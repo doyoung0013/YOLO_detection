@@ -8,8 +8,8 @@ class CommentSerializer(serializers.ModelSerializer):
 
 
 class PostSerializer(serializers.ModelSerializer):
-    image = serializers.SerializerMethodField()
-    comments = CommentSerializer(many=True, read_only=True)
+    #image = serializers.SerializerMethodField()
+    #comments = CommentSerializer(many=True, read_only=True)
 
     def get_image(self, obj):
         # obj가 dict인 경우 (생성 시) 처리
