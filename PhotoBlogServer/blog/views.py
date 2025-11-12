@@ -1,14 +1,17 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from django.utils import timezone 
+from django.utils import timezone
+from django.contrib.auth.models import User
+from django.core.cache import cache
+from django.db.models import F, Count
+from django.db.models.functions import TruncDate
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from .models import Post, Comment
+from datetime import datetime, timedelta
+from .models import Post, Comment, ObjectCount
 from .serializers import PostSerializer, CommentSerializer
 from .forms import PostForm
-from django.contrib.auth.models import User
-from django.core.cache import cache
-from django.db.models import F
+
 
 # REST API용 ViewSet
 class BlogImages(viewsets.ModelViewSet):
@@ -21,42 +24,30 @@ class BlogImages(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         print(f"[DEBUG] 요청 데이터: {request.data}")
         print(f"[DEBUG] 요청 파일: {request.FILES}")
-        
-        # User 가져오기 또는 생성
-        try:
-            user = User.objects.first()
-            if user is None:
-                print("[DEBUG] User가 없어서 생성합니다.")
-                user = User.objects.create_user(
-                    username='default_user',
-                    email='default@example.com',
-                    password='defaultpassword123'
-                )
-            print(f"[DEBUG] 사용할 User: {user.username} (ID: {user.id})")
-        except Exception as e:
-            print(f"[ERROR] User 처리 중 에러: {e}")
-            return Response(
-                {'error': f'User 처리 오류: {str(e)}'}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-        
-        # Serializer 생성 및 검증
+
+        # 1️⃣ 유저 가져오기
+        user = User.objects.first() or User.objects.create_user(
+            username='default_user',
+            password='defaultpassword123'
+        )
+
+        # 2️⃣ 게시글 저장
         serializer = self.get_serializer(data=request.data)
-        if not serializer.is_valid():
-            print(f"[ERROR] Serializer 검증 실패: {serializer.errors}")
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
-        # 저장
-        try:
-            serializer.save(author=user, published_date=timezone.now())
-            print("[DEBUG] 게시물 저장 성공!")
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        except Exception as e:
-            print(f"[ERROR] 저장 중 에러: {e}")
-            return Response(
-                {'error': f'저장 오류: {str(e)}'}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+        serializer.is_valid(raise_exception=True)
+        post = serializer.save(author=user, published_date=timezone.now())
+        print("[DEBUG] 게시물 저장 성공!")
+
+        # 3️⃣ text 필드 파싱해서 객체별 count 업데이트
+        text = request.data.get('text', '')  # "person, cellphone, "
+        object_names = [obj.strip() for obj in text.split(',') if obj.strip()]
+
+        for name in object_names:
+            obj_count, created = ObjectCount.objects.get_or_create(name=name)
+            obj_count.count += 1
+            obj_count.save()
+            print(f"[DEBUG] 객체 {name} 감지 횟수: {obj_count.count}")
+
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 # 웹 페이지용 함수형 View들
@@ -136,3 +127,35 @@ def get_comments(request, pk):
     comments = post.comments.order_by('-created_at')
     serializer = CommentSerializer(comments, many=True)
     return Response(serializer.data, status=status.HTTP_200_OK)
+
+# yolov5 통계
+@api_view(['GET'])
+def detection_stats(request):
+    today = datetime.now()
+    week_ago = today - timedelta(days=7)
+
+    # 최근 7일간 업로드된 게시물 필터
+    recent_posts = Post.objects.filter(created_date__gte=week_ago)
+
+    # (1) 일자별 탐지 횟수
+    daily_stats = (
+        recent_posts
+        .annotate(day=TruncDate('created_date'))
+        .values('day')
+        .annotate(count=Count('id'))
+        .order_by('day')
+    )
+
+    # (2) 객체 유형별 탐지 횟수 (title 기준)
+    type_stats = (
+        recent_posts
+        .values('title')
+        .annotate(count=Count('id'))
+        .order_by('-count')
+    )
+
+    data = {
+        "daily_stats": list(daily_stats),
+        "type_stats": list(type_stats),
+    }
+    return Response(data)

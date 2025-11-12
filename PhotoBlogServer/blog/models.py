@@ -18,3 +18,10 @@ class Comment(models.Model):
     nickname = models.CharField(max_length=30)
     content = models.TextField()
     created_at = models.DateTimeField(default=timezone.now)
+
+class ObjectCount(models.Model):
+    name = models.CharField(max_length=50, unique=True)  # 객체 이름 (예: person)
+    count = models.PositiveIntegerField(default=0)        # 누적 감지 횟수
+
+    def __str__(self):
+        return f"{self.name}: {self.count}"

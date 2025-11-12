@@ -40,8 +40,8 @@ public class MainActivity extends AppCompatActivity {
 
     TextView textView;
 
-    String site_url = "https://doyoung.pythonanywhere.com"; //배포 서버
-    //String site_url = "http://10.0.2.2:8000"; //개발 서버
+    //String site_url = "https://doyoung.pythonanywhere.com"; //배포 서버
+    String site_url = "http://10.0.2.2:8000"; //개발 서버
     //String site_url = "http://192.168.45.206:8000"; //socket_server test
 
     String token = "1db64f54572b2cd2c98d3af0aab5542fe2540415";
