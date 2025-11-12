@@ -134,10 +134,8 @@ def detection_stats(request):
     today = datetime.now()
     week_ago = today - timedelta(days=7)
 
-    # 최근 7일간 업로드된 게시물 필터
+    # 일자별 통계 (Post 기준)
     recent_posts = Post.objects.filter(created_date__gte=week_ago)
-
-    # (1) 일자별 탐지 횟수
     daily_stats = (
         recent_posts
         .annotate(day=TruncDate('created_date'))
@@ -146,16 +144,11 @@ def detection_stats(request):
         .order_by('day')
     )
 
-    # (2) 객체 유형별 탐지 횟수 (title 기준)
-    type_stats = (
-        recent_posts
-        .values('title')
-        .annotate(count=Count('id'))
-        .order_by('-count')
-    )
+    # 객체별 통계 (ObjectCount 기준)
+    type_stats = list(ObjectCount.objects.all().values('name', 'count').order_by('-count'))
 
     data = {
         "daily_stats": list(daily_stats),
-        "type_stats": list(type_stats),
+        "type_stats": type_stats
     }
     return Response(data)
