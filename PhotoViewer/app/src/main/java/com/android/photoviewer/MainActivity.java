@@ -36,29 +36,46 @@ import android.view.LayoutInflater;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 
+import android.graphics.Color;
+import android.os.Bundle;
+import android.util.Log;
+import androidx.appcompat.app.AppCompatActivity;
+import com.github.mikephil.charting.charts.BarChart;
+import com.github.mikephil.charting.charts.PieChart;
+import com.github.mikephil.charting.components.Description;
+import com.github.mikephil.charting.data.BarData;
+import com.github.mikephil.charting.data.BarDataSet;
+import com.github.mikephil.charting.data.BarEntry;
+import com.github.mikephil.charting.data.PieData;
+import com.github.mikephil.charting.data.PieDataSet;
+import com.github.mikephil.charting.data.PieEntry;
+import com.github.mikephil.charting.utils.ColorTemplate;
+
 public class MainActivity extends AppCompatActivity {
 
     TextView textView;
 
-    //String site_url = "https://doyoung.pythonanywhere.com"; //배포 서버
-    String site_url = "http://10.0.2.2:8000"; //개발 서버
+    private final String site_url = "https://doyoung.pythonanywhere.com"; //배포 서버
+    //private final String site_url = "http://10.0.2.2:8000"; //개발 서버
     //String site_url = "http://192.168.45.206:8000"; //socket_server test
-
+    private final String API_STATS = site_url + "/api_root/stats/";
     String token = "1db64f54572b2cd2c98d3af0aab5542fe2540415";
 
     CloadImage taskDownload;
     PutPost taskUpload;
 
-    // ✅ 선택된 이미지 URI 저장
     private Uri selectedImageUri;
 
-    // ✅ 이미지 선택을 위한 ActivityResultLauncher
     private ActivityResultLauncher<String> imagePickerLauncher;
 
     Spinner spinnerSort;
     List<PostItem> postList = new ArrayList<>();
     EditText editSearch;
-    RecyclerView recyclerView; // ✅ 전역 선언 추가
+    RecyclerView recyclerView;
+
+    private BarChart barChart;
+    private PieChart pieChart;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -69,7 +86,11 @@ public class MainActivity extends AppCompatActivity {
         editSearch = findViewById(R.id.edit_search);
         spinnerSort = findViewById(R.id.spinner_sort);
         recyclerView = findViewById(R.id.recyclerView);
-        recyclerView.setLayoutManager(new LinearLayoutManager(this)); // ✅ RecyclerView 초기화
+        recyclerView.setLayoutManager(new LinearLayoutManager(this));
+        barChart = findViewById(R.id.barChart);
+        pieChart = findViewById(R.id.pieChart);
+
+        loadStatsFromServer();
 
         // ✅ Spinner 항목 연결
         ArrayAdapter<CharSequence> adapter = ArrayAdapter.createFromResource(
@@ -126,6 +147,7 @@ public class MainActivity extends AppCompatActivity {
         taskDownload = new CloadImage();
         taskDownload.execute(site_url + "/api_root/Post/");
         Toast.makeText(this, "Download 시작", Toast.LENGTH_SHORT).show();
+        loadStatsFromServer();
     }
 
     /** ✅ '새로운 이미지 게시' 버튼 클릭 시: 이미지 선택 다이얼로그 열기 */
@@ -142,6 +164,144 @@ public class MainActivity extends AppCompatActivity {
 
         taskUpload = new PutPost(selectedImageUri, "안드로이드에서 올린 테스트 게시물");
         taskUpload.execute(site_url + "/api_root/Post/");
+    }
+
+    private void loadStatsFromServer() {
+        new Thread(() -> {
+            try {
+                URL url = new URL(API_STATS);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+
+                if (conn.getResponseCode() == 200) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                    StringBuilder response = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) response.append(line);
+                    reader.close();
+                    conn.disconnect();
+
+                    JSONObject json = new JSONObject(response.toString());
+                    JSONArray dailyStats = json.getJSONArray("daily_stats");
+                    JSONArray typeStats = json.getJSONArray("type_stats");
+
+                    ArrayList<BarEntry> barEntries = new ArrayList<>();
+                    ArrayList<String> barLabels = new ArrayList<>();
+
+                    for (int i = 0; i < dailyStats.length(); i++) {
+                        JSONObject obj = dailyStats.getJSONObject(i);
+                        barEntries.add(new BarEntry(i, obj.getInt("count")));
+                        barLabels.add(obj.getString("day").substring(5)); // MM-DD만 표시
+                    }
+
+                    ArrayList<PieEntry> pieEntries = new ArrayList<>();
+                    for (int i = 0; i < typeStats.length(); i++) {
+                        JSONObject obj = typeStats.getJSONObject(i);
+                        pieEntries.add(new PieEntry(obj.getInt("count"), obj.getString("name")));
+                    }
+
+                    runOnUiThread(() -> {
+                        showBarChart(barEntries, barLabels);
+                        showPieChart(pieEntries);
+                    });
+                } else {
+                    runOnUiThread(() ->
+                            Toast.makeText(this, "통계 데이터를 불러올 수 없습니다.", Toast.LENGTH_SHORT).show());
+                }
+
+            } catch (Exception e) {
+                Log.e("StatsError", e.toString());
+                runOnUiThread(() ->
+                        Toast.makeText(this, "통계 로드 실패: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        }).start();
+    }
+
+    private void showBarChart(ArrayList<BarEntry> entries, ArrayList<String> labels) {
+        BarDataSet dataSet = new BarDataSet(entries, "최근 일주일 탐지 추세");
+        dataSet.setColors(ColorTemplate.MATERIAL_COLORS);
+        dataSet.setValueTextSize(12f);
+        dataSet.setValueTextColor(Color.BLACK);
+        dataSet.setValueFormatter(new com.github.mikephil.charting.formatter.ValueFormatter() {
+            @Override
+            public String getFormattedValue(float value) {
+                return String.valueOf((int) value);
+            }
+        });
+
+        BarData data = new BarData(dataSet);
+        barChart.setData(data);
+
+        Description desc = new Description();
+        desc.setText("");
+        barChart.setDescription(desc);
+
+        com.github.mikephil.charting.components.XAxis xAxis = barChart.getXAxis();
+        xAxis.setValueFormatter(new com.github.mikephil.charting.formatter.IndexAxisValueFormatter(labels));
+        xAxis.setPosition(com.github.mikephil.charting.components.XAxis.XAxisPosition.BOTTOM);
+        xAxis.setGranularity(1f);
+        xAxis.setGranularityEnabled(true);
+        xAxis.setTextSize(10f);
+        xAxis.setTextColor(Color.BLACK);
+
+        com.github.mikephil.charting.components.YAxis leftAxis = barChart.getAxisLeft();
+        leftAxis.setValueFormatter(new com.github.mikephil.charting.formatter.ValueFormatter() {
+            @Override
+            public String getFormattedValue(float value) {
+                return String.valueOf((int) value);
+            }
+        });
+        leftAxis.setGranularity(1f);
+        leftAxis.setTextColor(Color.BLACK);
+        barChart.getAxisRight().setEnabled(false);
+        barChart.setTouchEnabled(true);
+        barChart.setDragEnabled(false);
+        barChart.setScaleEnabled(false);
+        barChart.setPinchZoom(false);
+        com.github.mikephil.charting.components.Legend legend = barChart.getLegend();
+        legend.setTextSize(12f);
+        legend.setTextColor(Color.BLACK);
+
+        barChart.animateY(1000);
+        barChart.invalidate();
+    }
+
+    private void showPieChart(ArrayList<PieEntry> entries) {
+        PieDataSet dataSet = new PieDataSet(entries, "객체별 탐지 비율");
+        dataSet.setColors(ColorTemplate.COLORFUL_COLORS);
+        dataSet.setValueTextSize(12f);
+        dataSet.setSliceSpace(2f);
+
+        dataSet.setValueFormatter(new com.github.mikephil.charting.formatter.ValueFormatter() {
+            @Override
+            public String getFormattedValue(float value) {
+                return String.valueOf((int) value);
+            }
+        });
+
+        PieData data = new PieData(dataSet);
+        pieChart.setData(data);
+
+        Description desc = new Description();
+        desc.setText("");
+        pieChart.setDescription(desc);
+
+        pieChart.setDrawHoleEnabled(true);
+        pieChart.setHoleRadius(40f);
+        pieChart.setTransparentCircleRadius(45f);
+        pieChart.setCenterText("탐지 분포");
+        pieChart.setCenterTextSize(14f);
+        pieChart.setCenterTextColor(Color.BLACK);
+
+        com.github.mikephil.charting.components.Legend legend = pieChart.getLegend();
+        legend.setVerticalAlignment(com.github.mikephil.charting.components.Legend.LegendVerticalAlignment.BOTTOM);
+        legend.setHorizontalAlignment(com.github.mikephil.charting.components.Legend.LegendHorizontalAlignment.CENTER);
+        legend.setOrientation(com.github.mikephil.charting.components.Legend.LegendOrientation.HORIZONTAL);
+        legend.setDrawInside(false);
+        legend.setTextSize(10f);
+
+        pieChart.animateY(1000);
+        pieChart.invalidate();
     }
 
     private class CloadImage extends AsyncTask<String, Integer, List<PostItem>> {
